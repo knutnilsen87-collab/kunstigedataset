@@ -12,6 +12,7 @@ Datasettet kombinerer **eierskapsgraf**, **kontrollgraf** og **transaksjonsflyt*
 - 📈 **[ML Evaluation Report](EVALUATION_REPORT.md)** – Benchmark som dokumenterer 6.6x presisjonsløft (90.9 % vs 13.7 % for enkle regler).
 - ⚖️ **[Commercial & Evaluation Terms](COMMERCIAL_TERMS.md)** – Pilotlisens og vilkår for kommersiell testing.
 - 🗄️ **[BigQuery Graph & GQL Queries](bigquery_graph_queries.sql)** – DDL for Property Graph og spørringer for eierkjeder og lånesirkler.
+- 🤝 **[Outreach Playbook](OUTREACH_PLAYBOOK.md)** – Valideringsstrategi og maler for kontakt med regtech og banker.
 
 ---
 
