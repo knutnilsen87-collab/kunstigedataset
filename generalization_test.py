@@ -1,8 +1,9 @@
 """
-Cross-Graph Generalization & Out-of-Distribution Validation Test
-Tester om ML-modellen trent på én syntetisk graf generaliserer til en helt uavhengig
-graf generert med andre parametere, endret støy-distribusjon og andre tilfeldighetsfrø (seeds).
-Dette adresserer direkte risikoen for 'generator overfitting'.
+Cross-Graph Generalization & Out-of-Distribution Validation Test (Herdet versjon)
+Inkluderer:
+1. Faktisk anvendelse av amount_shift (f.eks. +40% forskyvning i beløpsfordelinger).
+2. NetworkX MultiDiGraph for å bevare parallelle roller uten overskriving.
+3. Reell støy med legitime private lån (selgerkreditt) som forhindrer enkle snarveier.
 """
 
 import random
@@ -25,14 +26,17 @@ def generate_graph_dataset(seed, num_properties=600, noise_factor=1.0, amount_sh
     cfg.NUM_PROPERTIES = num_properties
     cfg.NUM_PERSONS = int(400 * noise_factor)
     cfg.NUM_COMPANIES = int(120 * noise_factor)
+    cfg.AMOUNT_SHIFT = amount_shift  # NÅ FAKTISK ANVENDT!
     cfg.OUTPUT_DIR = f"output_test_seed_{seed}"
     
     gen = GraphGenerator(cfg)
     gen.generate_base_graph()
     gen.inject_legitimate_bank_mortgages()
+    gen.inject_legitimate_private_mortgages()
     gen.inject_legitimate_holding_structures()
     gen.inject_legitimate_inheritance_discrepancies()
     gen.inject_legitimate_joint_ownerships()
+    
     gen.inject_blankoskjoete_scenarios()
     gen.inject_layered_holding_scenarios()
     gen.inject_loan_back_mortgage_scenarios()
@@ -41,7 +45,8 @@ def generate_graph_dataset(seed, num_properties=600, noise_factor=1.0, amount_sh
     return gen.entities, gen.ownership_edges, gen.transactions, gen.ground_truth
 
 def extract_features_from_graph(entities, ownership_edges, transactions, ground_truth):
-    G_own = nx.DiGraph()
+    # Bruk MultiDiGraph for å forhindre overskriving av parallelle roller
+    G_own = nx.MultiDiGraph()
     for e in entities:
         G_own.add_node(e["id"], entity_type=e["type"])
     for oe in ownership_edges:
@@ -77,7 +82,7 @@ def extract_features_from_graph(entities, ownership_edges, transactions, ground_
     X, y, y_typology = [], [], []
     
     for prop in properties:
-        in_edges = G_own.in_edges(prop, data=True)
+        in_edges = list(G_own.in_edges(prop, data=True))
         reg_owners = [u for u, v, d in in_edges if d.get("role") == "registered_owner"]
         act_controllers = [u for u, v, d in in_edges if d.get("role") == "actual_controller"]
         mortgagees = [u for u, v, d in in_edges if d.get("role") == "mortgage_holder"]
@@ -108,13 +113,16 @@ def extract_features_from_graph(entities, ownership_edges, transactions, ground_
         bank_loan = tx_by_type_in[reg_owner]["bank_loan_disbursement"]
         bank_inst = tx_by_type_out[reg_owner]["bank_loan_installment"]
         family_tx = tx_by_type_in[reg_owner]["family_settlement"] + tx_by_type_out[reg_owner]["family_settlement"]
+        priv_disb = tx_by_type_in[reg_owner]["private_loan_disbursement"]
+        priv_inst = tx_by_type_out[reg_owner]["private_loan_installment"]
         net_flow = tx_in - tx_out
         
         feats = [
             len(reg_owners), len(act_controllers), has_discrepancy, is_company,
             has_mortgage, mortgagee_is_bank, mortgagee_is_priv, chain_depth,
             o_pr, o_in_deg, o_out_deg, tx_in, tx_out, prop_fin, eq_inj,
-            loan_disb, loan_repay, bank_loan, bank_inst, family_tx, net_flow
+            loan_disb, loan_repay, bank_loan, bank_inst, family_tx,
+            priv_disb, priv_inst, net_flow
         ]
         X.append(feats)
         if prop in gt_map:
@@ -128,19 +136,18 @@ def extract_features_from_graph(entities, ownership_edges, transactions, ground_
 
 def run_cross_graph_generalization():
     print("=" * 70)
-    print("GENERERING GRAF 1 (TRENINGS-GRAF, SEED 42)...")
-    ent1, edges1, tx1, gt1 = generate_graph_dataset(seed=42, num_properties=600)
+    print("GENERERING GRAF 1 (TRENINGS-GRAF: SEED 42, BASIS-BELØP: amount_shift=1.0)...")
+    ent1, edges1, tx1, gt1 = generate_graph_dataset(seed=42, num_properties=600, amount_shift=1.0)
     X_train, y_train, _ = extract_features_from_graph(ent1, edges1, tx1, gt1)
     
-    print("\nGENERERING GRAF 2 (UAVHENGIG TEST-GRAF MED PARAMETERSKIFT, SEED 999)...")
-    # Graf 2 har 800 eiendommer, 25% mer bakgrunnsstøy og en annen tilfeldighetsdistribusjon
-    ent2, edges2, tx2, gt2 = generate_graph_dataset(seed=999, num_properties=800, noise_factor=1.25)
+    print("\nGENERERING GRAF 2 (USETT TEST-GRAF: SEED 999, BELØPSSKIFT: amount_shift=1.40, +25% STØY)...")
+    # Graf 2 har 800 eiendommer, 25% mer bakgrunnsstøy og 40% skifte i transaksjonsstørrelser
+    ent2, edges2, tx2, gt2 = generate_graph_dataset(seed=999, num_properties=800, noise_factor=1.25, amount_shift=1.40)
     X_test, y_test, typ_test = extract_features_from_graph(ent2, edges2, tx2, gt2)
     
     print(f"\nTreningssett (Graf 1): {len(X_train)} eiendommer ({np.sum(y_train)} AML, {np.sum(y_train == 0)} normale)")
     print(f"Usett Testsett (Graf 2): {len(X_test)} eiendommer ({np.sum(y_test)} AML, {np.sum(y_test == 0)} normale)")
     
-    # Preprosessering tilpasses KUN på Graf 1
     imputer = SimpleImputer(strategy="median")
     X_train_imp = imputer.fit_transform(X_train)
     X_test_imp = imputer.transform(X_test)
@@ -149,7 +156,6 @@ def run_cross_graph_generalization():
     X_train_scaled = scaler.fit_transform(X_train_imp)
     X_test_scaled = scaler.transform(X_test_imp)
     
-    # Tren modeller på Graf 1
     models = {
         "Regelbasert Heuristikk": None,
         "Logistic Regression (L2)": LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42),
@@ -158,13 +164,12 @@ def run_cross_graph_generalization():
     }
     
     print("\n" + "=" * 70)
-    print("RESULTATER PÅ HELT USETT GRAF 2 (OUT-OF-DISTRIBUTION VALIDATION):")
+    print("RESULTATER PÅ HELT USETT GRAF 2 (HERDET CROSS-GRAPH VALIDATION):")
     print("=" * 70)
     
     for name, clf in models.items():
         if clf is None:
-            # Regelbasert heuristikk: discrepancy == 1 eller mortgage == 1
-            # Feature indeks 2 (has_discrepancy) og indeks 4 (has_mortgage)
+            # Regel: discrepancy == 1 eller mortgage == 1
             preds = ((X_test[:, 2] == 1) | (X_test[:, 4] == 1)).astype(int)
         else:
             clf.fit(X_train_scaled, y_train)
@@ -180,7 +185,6 @@ def run_cross_graph_generalization():
         print(f"Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | F1: {f1:.4f}")
         print(f"Confusion Matrix (TN: {cm[0,0]}, FP: {cm[0,1]} / FN: {cm[1,0]}, TP: {cm[1,1]}):")
         
-        # Sjekk per typologi
         for typ in ["blankoskjoete", "layered_holding", "loan_back_mortgage"]:
             mask = (typ_test == typ)
             if np.sum(mask) > 0:

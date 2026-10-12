@@ -8,17 +8,19 @@ class Config:
     NUM_PERSONS = 400
     NUM_COMPANIES = 120
     NUM_BANKS = 4
+    AMOUNT_SHIFT = 1.0  # Faktor for forskyvning av transaksjonsstørrelser
     
     # Kriminelle AML-scenarioer (Ground Truth)
     NUM_BLANKOSKJOETE = 15
     NUM_LAYERED_HOLDING = 10
     NUM_LOAN_BACK = 10
     
-    # Legitime komplekse strukturer (Realistisk støy / Edge cases)
-    NUM_LEGIT_BANK_MORTGAGES = 180       # Legitime boliglån fra banker
-    NUM_LEGIT_HOLDING_CHAINS = 45        # Lovlige konsern/familieholdinger (AS bak AS)
-    NUM_LEGIT_INHERITANCE_DISCREPANCIES = 35  # Arv/uskifte/sameie der tinglyst != faktisk bruker
-    NUM_LEGIT_JOINT_OWNERSHIPS = 40      # Ektefeller / sameie med to eiere
+    # Legitime komplekse strukturer (Realistisk støy / Hard Edge Cases)
+    NUM_LEGIT_BANK_MORTGAGES = 180           # Legitime boliglån fra banker
+    NUM_LEGIT_PRIVATE_MORTGAGES = 30        # Legitim selgerkreditt / privatlån med pant (forurenser privat pant!)
+    NUM_LEGIT_HOLDING_CHAINS = 45            # Lovlige konsern/familieholdinger (AS bak AS)
+    NUM_LEGIT_INHERITANCE_DISCREPANCIES = 40 # Arv/uskifte/sameie der tinglyst != faktisk bruker
+    NUM_LEGIT_JOINT_OWNERSHIPS = 40          # Ektefeller / sameie med to eiere
     
     OUTPUT_DIR = "output"
 
@@ -42,11 +44,12 @@ class GraphGenerator:
         if entity_type == 'property':
             self.balances[entity_id] = 0
         elif entity_type == 'bank':
-            balance = initial_funds if initial_funds is not None else 500000000 # 500 MNOK
+            balance = initial_funds if initial_funds is not None else int(500000000 * self.config.AMOUNT_SHIFT)
             self.balances[entity_id] = balance
             self.initial_money += balance
         else:
-            balance = initial_funds if initial_funds is not None else random.randint(200000, 10000000)
+            base_funds = initial_funds if initial_funds is not None else random.randint(200000, 10000000)
+            balance = int(base_funds * self.config.AMOUNT_SHIFT)
             self.balances[entity_id] = balance
             self.initial_money += balance
             
@@ -79,7 +82,7 @@ class GraphGenerator:
             sender = random.choice(actors)
             receiver = random.choice(actors)
             if sender != receiver:
-                amount = random.randint(1000, 50000)
+                amount = int(random.randint(1000, 50000) * self.config.AMOUNT_SHIFT)
                 if self.balances[sender] >= amount:
                     self.balances[sender] -= amount
                     self.balances[receiver] += amount
@@ -98,25 +101,20 @@ class GraphGenerator:
     def inject_legitimate_bank_mortgages(self):
         """
         Legitime boliglån fra autoriserte banker.
-        Skaper 'mortgage_holder' kanter på ~30 % av eiendommene med ordinære bankrenter/avdrag.
-        Dette forhindrer at modeller naivt klassifiserer alle pant som hvitvasking!
         """
         print(f"Legger til {self.config.NUM_LEGIT_BANK_MORTGAGES} legitime banklån...")
         sample_props = random.sample(self.properties, self.config.NUM_LEGIT_BANK_MORTGAGES)
         
         for prop in sample_props:
             bank = random.choice(self.banks)
-            # Finn registrert eier
             reg_owners = [e["source"] for e in self.ownership_edges if e["target"] == prop and e["role"] == "registered_owner"]
             if not reg_owners:
                 continue
             owner = reg_owners[0]
             
-            # Legg til pantekant fra banken
             self.ownership_edges.append({"source": bank, "target": prop, "role": "mortgage_holder"})
             
-            # Bank utbetaler ordinært boliglån
-            loan_amt = random.randint(1500000, 6000000)
+            loan_amt = int(random.randint(1500000, 6000000) * self.config.AMOUNT_SHIFT)
             if self.balances[bank] >= loan_amt:
                 self.balances[bank] -= loan_amt
                 self.balances[owner] += loan_amt
@@ -128,8 +126,7 @@ class GraphGenerator:
                     "type": "bank_loan_disbursement"
                 })
                 
-                # Ordinære månedlige avdrag tilbake til banken
-                installment = random.randint(10000, 30000)
+                installment = int(random.randint(10000, 30000) * self.config.AMOUNT_SHIFT)
                 for _ in range(2):
                     if self.balances[owner] >= installment:
                         self.balances[owner] -= installment
@@ -142,10 +139,57 @@ class GraphGenerator:
                             "type": "bank_loan_installment"
                         })
 
+    def inject_legitimate_private_mortgages(self):
+        """
+        Legitim selgerkreditt eller privat pantelån (fra privatperson eller ordinært selskap).
+        Dette forurenser featuren 'mortgagee_is_private_co', slik at modellen må lære
+        å skille legitime private lån fra kriminelle loan-back sirkler!
+        """
+        print(f"Legger til {self.config.NUM_LEGIT_PRIVATE_MORTGAGES} legitime private pantelån (selgerkreditt)...")
+        # Velg eiendommer som ikke allerede har kriminelt pant
+        available = [p for p in self.properties if not any(e["target"] == p and e["role"] == "mortgage_holder" for e in self.ownership_edges)]
+        sample_props = random.sample(available, min(len(available), self.config.NUM_LEGIT_PRIVATE_MORTGAGES))
+        
+        actors = self.persons + self.companies
+        for prop in sample_props:
+            reg_owners = [e["source"] for e in self.ownership_edges if e["target"] == prop and e["role"] == "registered_owner"]
+            if not reg_owners:
+                continue
+            borrower = reg_owners[0]
+            
+            # Legitim privat kredittyter (f.eks. tidligere eier eller forelder)
+            lender = random.choice([a for a in actors if a != borrower])
+            
+            self.ownership_edges.append({"source": lender, "target": prop, "role": "mortgage_holder"})
+            
+            loan_amt = int(random.randint(500000, 2500000) * self.config.AMOUNT_SHIFT)
+            if self.balances[lender] >= loan_amt:
+                self.balances[lender] -= loan_amt
+                self.balances[borrower] += loan_amt
+                self.transactions.append({
+                    "id": str(uuid.uuid4()),
+                    "sender": lender,
+                    "receiver": borrower,
+                    "amount": loan_amt,
+                    "type": "private_loan_disbursement"
+                })
+                
+                installment = int(random.randint(15000, 45000) * self.config.AMOUNT_SHIFT)
+                for _ in range(2):
+                    if self.balances[borrower] >= installment:
+                        self.balances[borrower] -= installment
+                        self.balances[lender] += installment
+                        self.transactions.append({
+                            "id": str(uuid.uuid4()),
+                            "sender": borrower,
+                            "receiver": lender,
+                            "amount": installment,
+                            "type": "private_loan_installment"
+                        })
+
     def inject_legitimate_holding_structures(self):
         """
         Legitime konsernstrukturer (AS som eier AS som eier eiendom).
-        Helt lovlig, åpen eierkjede uten hemmelige bakmenn eller fiktiv kapital.
         """
         print(f"Legger til {self.config.NUM_LEGIT_HOLDING_CHAINS} legitime konsern- og holdingselskaper...")
         sample_props = random.sample(self.properties, self.config.NUM_LEGIT_HOLDING_CHAINS)
@@ -155,17 +199,14 @@ class GraphGenerator:
             holding_co = self._create_entity("company")
             prop_co = self._create_entity("company")
             
-            # Fjern gammelt eierskap
             self.ownership_edges = [e for e in self.ownership_edges if e["target"] != prop]
             
-            # Lovlig eierkjede
             self.ownership_edges.append({"source": owner_person, "target": holding_co, "role": "shareholder"})
             self.ownership_edges.append({"source": holding_co, "target": prop_co, "role": "shareholder"})
             self.ownership_edges.append({"source": prop_co, "target": prop, "role": "registered_owner"})
             self.ownership_edges.append({"source": owner_person, "target": prop, "role": "actual_controller"})
             
-            # Ordinært konsernbidrag
-            transfer_amt = random.randint(500000, 2000000)
+            transfer_amt = int(random.randint(500000, 2000000) * self.config.AMOUNT_SHIFT)
             if self.balances[holding_co] >= transfer_amt:
                 self.balances[holding_co] -= transfer_amt
                 self.balances[prop_co] += transfer_amt
@@ -179,10 +220,7 @@ class GraphGenerator:
 
     def inject_legitimate_inheritance_discrepancies(self):
         """
-        Legitime divergenser mellom tinglyst og faktisk eier:
-        - Arveoppgjør / uskifte / foreldre som står som tinglyst mens arving er faktisk bruker.
-        - Ingen mistenkelig 'property_financing' fra kriminelle bakmenn.
-        Dette tester false positive-raten til regelsjekker som bare sjekker registered != actual!
+        Legitime divergenser mellom tinglyst og faktisk eier (Arv/uskifte).
         """
         print(f"Legger til {self.config.NUM_LEGIT_INHERITANCE_DISCREPANCIES} legitime arve-/uskifteavvik...")
         sample_props = random.sample(self.properties, self.config.NUM_LEGIT_INHERITANCE_DISCREPANCIES)
@@ -194,12 +232,11 @@ class GraphGenerator:
                 continue
                 
             self.ownership_edges = [e for e in self.ownership_edges if e["target"] != prop]
-            # Forelder/dødsbo står fortsatt tinglyst, men arving disponerer og kontrollerer
             self.ownership_edges.append({"source": parent, "target": prop, "role": "registered_owner"})
             self.ownership_edges.append({"source": heir, "target": prop, "role": "actual_controller"})
             
-            # Helt ordinær familietransaksjon (gebyr/gave/arveoppgjør)
-            amount = random.randint(10000, 100000)
+            # Arveoppgjør eller familieoverføring med beløp som delvis overlapper med kjøp
+            amount = int(random.randint(50000, 1500000) * self.config.AMOUNT_SHIFT)
             if self.balances[heir] >= amount:
                 self.balances[heir] -= amount
                 self.balances[parent] += amount
@@ -213,7 +250,7 @@ class GraphGenerator:
 
     def inject_legitimate_joint_ownerships(self):
         """
-        Legitimt sameie: To registrerte eiere (f.eks. ektefeller).
+        Legitimt sameie: To registrerte eiere.
         """
         print(f"Legger til {self.config.NUM_LEGIT_JOINT_OWNERSHIPS} legitime sameier...")
         sample_props = random.sample(self.properties, self.config.NUM_LEGIT_JOINT_OWNERSHIPS)
@@ -228,11 +265,6 @@ class GraphGenerator:
     # =========================================================================
 
     def inject_blankoskjoete_scenarios(self):
-        """
-        Typology 1: Blankoskjøte (Illegitim stråmann)
-        En stråmann er formelt registrert eier, men den reelle bakmannen er actual_controller.
-        Bakmann overfører kjøpesum til stråmannen under type 'property_financing'.
-        """
         print(f"Injisere {self.config.NUM_BLANKOSKJOETE} 'blankoskjøte' scenarioer...")
         actors = self.persons + self.companies
         
@@ -248,7 +280,7 @@ class GraphGenerator:
             self.ownership_edges.append({"source": strawman, "target": prop, "role": "registered_owner"})
             self.ownership_edges.append({"source": hidden_owner, "target": prop, "role": "actual_controller"})
             
-            amount = random.randint(2000000, 6000000)
+            amount = int(random.randint(2000000, 6000000) * self.config.AMOUNT_SHIFT)
             self.balances[hidden_owner] += amount
             self.initial_money += amount
             self.balances[hidden_owner] -= amount
@@ -281,12 +313,6 @@ class GraphGenerator:
             })
 
     def inject_layered_holding_scenarios(self):
-        """
-        Typology 2: Lagdelte holdingselskaper (Kriminell Corporate Veil)
-        En UBO gjemmer seg bak en kjede av stråselskaper (2-3 lag med AS).
-        UBO -> Holding1 (AS) -> Holding2 (AS) -> PropCo (AS) -> Eiendom.
-        Penger sluses ned som 'equity_injection'.
-        """
         print(f"Injisere {self.config.NUM_LAYERED_HOLDING} kriminelle 'lagdelte holdingselskaper' scenarioer...")
         for _ in range(self.config.NUM_LAYERED_HOLDING):
             prop = random.choice(self.properties)
@@ -304,7 +330,7 @@ class GraphGenerator:
             self.ownership_edges.append({"source": prop_co, "target": prop, "role": "registered_owner"})
             self.ownership_edges.append({"source": ubo, "target": prop, "role": "actual_controller"})
             
-            equity_amount = random.randint(4000000, 12000000)
+            equity_amount = int(random.randint(4000000, 12000000) * self.config.AMOUNT_SHIFT)
             self.balances[ubo] += equity_amount
             self.initial_money += equity_amount
             
@@ -358,12 +384,6 @@ class GraphGenerator:
             })
 
     def inject_loan_back_mortgage_scenarios(self):
-        """
-        Typology 3: Fiktivt lån / Third-party Mortgage Fraud (Loan-back scheme)
-        En hemmelig bakmann kontrollerer et ugjennomsiktig utlånsselskap (LenderCo).
-        LenderCo tildeler lån ('loan_disbursement') og tar pant ('mortgage_holder') i eiendommen.
-        Låntaker betaler tilbake fiktive renter/avdrag ('loan_repayment') til LenderCo.
-        """
         print(f"Injisere {self.config.NUM_LOAN_BACK} kriminelle 'fiktivt lån / loan-back' scenarioer...")
         for _ in range(self.config.NUM_LOAN_BACK):
             prop = random.choice(self.properties)
@@ -382,7 +402,7 @@ class GraphGenerator:
             self.ownership_edges.append({"source": borrower, "target": prop, "role": "registered_owner"})
             self.ownership_edges.append({"source": borrower, "target": prop, "role": "actual_controller"})
             
-            loan_amount = random.randint(3000000, 8000000)
+            loan_amount = int(random.randint(3000000, 8000000) * self.config.AMOUNT_SHIFT)
             self.balances[lender_co] += loan_amount
             self.initial_money += loan_amount
             
@@ -396,7 +416,7 @@ class GraphGenerator:
                 "type": "loan_disbursement"
             })
             
-            installment = random.randint(150000, 400000)
+            installment = int(random.randint(150000, 400000) * self.config.AMOUNT_SHIFT)
             for _ in range(2):
                 if self.balances[borrower] >= installment:
                     self.balances[borrower] -= installment
@@ -428,17 +448,13 @@ class GraphGenerator:
             })
 
     def validate_balance_conservation(self):
-        """
-        Validerer at summen av penger på start-tidspunktet tilsvarer 
-        summen av penger nå (pengesirkulasjonen er lukket).
-        """
         print("Validerer balanse (balance conservation)...")
         current_money = sum(self.balances.values())
         if current_money == self.initial_money:
-            print("OK Balance conservation validert: Ingen midler er tapt eller oppstatt ut av intet.")
+            print("OK Balance conservation validert: Ingen midler er tapt eller oppstått ut av intet.")
             return True
         else:
-            print(f"ADVARSEL: Balansefeil! Start: {self.initial_money}, Naa: {current_money}")
+            print(f"ADVARSEL: Balansefeil! Start: {self.initial_money}, Nå: {current_money}")
             return False
             
     def _write_csv(self, filename, data):
@@ -467,19 +483,16 @@ if __name__ == "__main__":
     generator = GraphGenerator(config)
     
     generator.generate_base_graph()
-    
-    # 1. Legg til realistisk legitim støy
     generator.inject_legitimate_bank_mortgages()
+    generator.inject_legitimate_private_mortgages()
     generator.inject_legitimate_holding_structures()
     generator.inject_legitimate_inheritance_discrepancies()
     generator.inject_legitimate_joint_ownerships()
     
-    # 2. Injisere kriminelle hvitvaskingsmønstre (Ground Truth)
     generator.inject_blankoskjoete_scenarios()
     generator.inject_layered_holding_scenarios()
     generator.inject_loan_back_mortgage_scenarios()
     
-    # 3. Verifiser matematisk balanse og eksporter
     generator.validate_balance_conservation()
     generator.export_data()
-    print("Skriptet er ferdig kjørt med både legitime komplekse strukturer og AML-anomalier!")
+    print("Skriptet er ferdig kjørt med herdede testmønstre og private lån!")
