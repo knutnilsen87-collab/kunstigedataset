@@ -50,7 +50,7 @@ MATCH (mastermind:Entity)-[:OwnershipEdge {role: 'actual_controller'}]->(lender:
       (lender)-[:OwnershipEdge {role: 'mortgage_holder'}]->(prop:Entity),
       (borrower:Entity)-[:OwnershipEdge {role: 'registered_owner'}]->(prop),
       (lender)-[disb:Transfer {type: 'loan_disbursement'}]->(borrower),
-      (borrower)-[repay:Transfer {type: 'loan_repayment'}]->(lender)
+      (borrower)-[repay:Transfer {type: 'loan_installment'}]->(lender)
 RETURN 
   mastermind.id AS hidden_lender_id,
   lender.id AS shell_lender_id,
@@ -65,7 +65,7 @@ RETURN
 GRAPH `datsetsyntetisk.aml_synth.aml_network_graph`
 MATCH (strawman:Entity)-[:OwnershipEdge {role: 'registered_owner'}]->(prop:Entity),
       (hidden:Entity)-[:OwnershipEdge {role: 'actual_controller'}]->(prop),
-      (hidden)-[fin:Transfer {type: 'property_financing'}]->(strawman)
+      (hidden)-[fin:Transfer {type: 'transfer'}]->(strawman)
 WHERE strawman.id != hidden.id
 RETURN 
   prop.id AS property_id,
@@ -142,6 +142,6 @@ JOIN `datsetsyntetisk.aml_synth.transactions` disb
 LEFT JOIN `datsetsyntetisk.aml_synth.transactions` repay
   ON borrower.source = repay.sender
   AND m.source = repay.receiver
-  AND repay.type = 'loan_repayment'
+  AND repay.type = 'loan_installment'
 WHERE m.role = 'mortgage_holder'
 GROUP BY property_id, lender_company, hidden_lender_mastermind, borrower, loan_amount;

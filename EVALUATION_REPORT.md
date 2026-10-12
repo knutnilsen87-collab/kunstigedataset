@@ -1,90 +1,92 @@
-# ML Evaluation Report: Herdet Cross-Graph & Multi-Model Benchmark
-**Prosjekt**: Syntetisk Grafdatasett for Eiendomshvitvasking (AML)  
-**Datasett**: `datsetsyntetisk.aml_synth` (600–800 eiendommer, 524–650 entiteter, 1 619–2 100 kanter, 2 575–3 400 transaksjoner)  
-**Graf-arkitektur**: NetworkX `MultiDiGraph` (sikrer at parallelle roller mellom samme noder bevares 100 %)  
-**Evaluering**:
-1. **Intern 70/30 Stratified Holdout Test** (180 eiendommer).
-2. **Out-of-Distribution Cross-Graph Test** (Modell trent på Graf 1 med seed 42 testet blindt på usett Graf 2 med seed 999, +40 % beløpsforskyvning (`amount_shift=1.40`) og +25 % støy).
+# ML Evaluation Report: Benchmark v0.2 (Independent Cross-Graph Validation)
+**Prosjekt**: Nordic AML Graph Pack – Syntetisk Grafdatasett for Eiendomshvitvasking  
+**Datasett**: `datsetsyntetisk.aml_synth` (600–850 eiendommer, 524–800 entiteter, 1 600–2 400 kanter, 2 500–3 800 transaksjoner)  
+**Metodikk**: Benchmark v0.2 (Nøytrale transaksjonstyper, disjunkte scenarioer, Multi-Seed Out-of-Distribution testing)  
+**Grafarkitektur**: NetworkX `MultiDiGraph` (sikrer at parallelle roller mellom noder bevares 100 %)  
 
 ---
 
-## 1. Hovedfunn: Fra Leketøy til Ekte Ikke-Lineær Separabilitet
+## 1. Hovedfunn: Ekte Generalisering Uten Leksikalsk Snarvei
 
-Ved å fjerne snarveier og innføre:
-- **30 legitime private pantelån** (selgerkreditt / familielån med tinglyst pant som forurenser `mortgagee_is_private_co`),
-- **Faktisk +40 % beløpsforskyvning** (`amount_shift = 1.40`),
-- **MultiDiGraph-arkitektur** som bevarer parallelle kanter for `registered_owner` og `actual_controller`,
-
-får vi frem en realistisk **ytelsesgradient** mellom modellene:
-
-```
-                                  Presisjon    Recall     F1-Score    Falske Positive (FP)
-Regelbasert Heuristikk:             11.9 %     100.0 %     0.2118             253
-Lineær Modell (Logistic Reg L2):    64.2 %     100.0 %     0.7816              19
-Gradient Boosting (HistGB):         93.9 %      91.2 %     0.9254               2
-Random Forest (100 trær):          100.0 %     100.0 %     1.0000               0
-```
-
-### Hva forteller denne gradienten oss?
-1. **Regel-kollaps (11,9 % presisjon, 253 falske alarmer)**: En regel som flagger eiendommer basert på `discrepancy` eller `mortgage` kveles fullstendig av legitime boliglån, selgerkreditter og arveoppgjør.
-2. **Lineære begrensninger (64,2 % presisjon, 19 falske alarmer)**: Logistisk regresjon mister presisjon fordi en enkel lineær hyperflate ikke klarer å skille legitime private lån fra kriminelle loan-back-opplegg når begge har privat panthaver.
-3. **Ikke-lineær overlegenhet (93,9 % – 100 % presisjon)**: Tree-baserte ensembler (Random Forest og Gradient Boosting) fanger opp den **multivariate samvariasjonen**:
-   $$\text{Privat Pant} \;\land\; \text{Manglende ordinære avdrag} \;\land\; \text{Sirkulær tilbakeføring} \;\land\; \text{Uforklarlig likviditet}$$
-   Dette beviser at datasettet krever ekte relasjonell maskinlæring, og ikke er en "triviell lekeoppgave".
+I Benchmark v0.2 er all leksikalsk datalekkasje eliminert:
+1. **Nøytrale transaksjonstyper**: Alle transaksjoner er standardisert til fire universelle banktyper:
+   - `transfer` (brukes i ordinære betalinger, legitime arveoppgjør og kriminelt blankoskjøte)
+   - `capital_contribution` (brukes i både legitime konsernstrukturer og kriminelle lagdelte holdingselskaper)
+   - `loan_disbursement` (brukes av banker, legitime private panthavere og kriminelle loan-back selskaper)
+   - `loan_installment` (brukes for bankavdrag, private avdrag og sirkulære loan-back tilbakeføringer)
+2. **Disjunkte scenarioer**: Ingen overlapp eller overskriving av eiendommer eller ground truth. Hver eiendom er reservert til nøyaktig én typologistruktur.
+3. **Multi-Seed Blind Testing**: Modeller trent på Graf 1 (Seed 42, 600 eiendommer, basis-beløp) testes blindt på 4 helt uavhengige testgrafer med varierende grafstørrelse, opptil +60 % beløpsforskyvning (`amount_shift=1.60`) og opptil +30 % økt støy.
 
 ---
 
-## 2. Injisert Markedsstruktur: Herdede Edge Cases
+## 2. Samlet Benchmark v0.2 Resultat (4 Uavhengige Test-Grafer)
 
-| Kategori | Volum | Egenskaper | Formål i Evalueringen |
-| :--- | :---: | :--- | :--- |
-| **Legitime Banklån** | 180 | Pant registrert på autoriserte banker (DNB, Nordea etc.). | Forurenser `has_mortgage`. |
-| **Legitim Selgerkreditt / Privat Pant** | 30 | Pant registrert på privatperson eller ordinært AS med vanlige avdrag. | Forurenser `mortgagee_is_private_co` slik at privat pant ikke kan brukes som en naiv snarvei. |
-| **Lovlige Konsernholdinger** | 45 | Legitime flerledds AS-eierskap med standard konsernbidrag. | Forurenser `holding_chain_depth`. |
-| **Arv & Uskifte** | 40 | `registered_owner != actual_controller` med familieoppgjør. | Forurenser `has_ownership_discrepancy` med beløp som delvis overlapper kjøpesummer. |
-| **Sameier** | 40 | To registrerte eiere (f.eks. ektefeller). | Realistisk eierstruktur. |
-| **Blankoskjøte (AML)** | 15 | Stråmann + reell bakmann + `property_financing`. | Kriminell anomali. |
-| **Lagdelt Holding (AML)** | 10 | Skjult UBO bak 3 lag stråselskaper + `equity_injection`. | Kriminell anomali. |
-| **Fiktivt Lån / Loan-Back (AML)** | 10 | Uregistrert privat LenderCo + `loan_disbursement` + sirkulære avdrag. | Kriminell anomali. |
+Resultatene rapporteres som **Gjennomsnitt ± Standardavvik** over Test-Graf A (Seed 101), Graf B (Seed 202), Graf C (Seed 555) og Graf D (Seed 999):
+
+| Modell | Test Presisjon (Mean ± Std) | Test Recall (Mean ± Std) | Test F1-Score (Mean ± Std) | Falske Positive (FP) | Falske Negative (FN) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Regelbasert Heuristikk** | **20.03 % ± 0.75 %** | **100.00 % ± 0.00 %** | **0.3337 ± 0.0104** | **140.0 ± 6.5** | **0.0 ± 0.0** |
+| **Logistic Regression (L2)** | **73.02 % ± 4.08 %** | **93.57 % ± 1.24 %** | **0.8195 ± 0.0254** | **12.2 ± 2.6** | **2.2 ± 0.5** |
+| **HistGradientBoosting** | **66.91 % ± 5.03 %** | **99.29 % ± 1.24 %** | **0.7982 ± 0.0343** | **17.5 ± 4.0** | **0.2 ± 0.5** |
+| **Random Forest (100 trær)** | **75.22 % ± 5.87 %** | **99.29 % ± 1.24 %** | **0.8543 ± 0.0321** | **11.8 ± 3.5** | **0.2 ± 0.5** |
+
+### Fordeling per Testgraf (OOD Variasjon):
+- **Graf A (Seed 101, 700 eiendommer, +20 % beløp, +15 % støy)**:
+  - Random Forest: Presisjon **85.00 %**, Recall **97.14 %**, F1 **0.9067**, FP: 6
+  - Heuristikk: Presisjon **21.08 %**, FP: 131
+- **Graf B (Seed 202, 750 eiendommer, +35 % beløp, +20 % støy)**:
+  - Random Forest: Presisjon **74.47 %**, Recall **100.00 %**, F1 **0.8537**, FP: 12
+  - Heuristikk: Presisjon **20.23 %**, FP: 138
+- **Graf C (Seed 555, 800 eiendommer, +45 % beløp, +25 % støy)**:
+  - Random Forest: Presisjon **71.43 %**, Recall **100.00 %**, F1 **0.8333**, FP: 14
+  - Heuristikk: Presisjon **19.77 %**, FP: 142
+- **Graf D (Seed 999, 850 eiendommer, +60 % beløp, +30 % støy)**:
+  - Random Forest: Presisjon **70.00 %**, Recall **100.00 %**, F1 **0.8235**, FP: 15
+  - Heuristikk: Presisjon **19.02 %**, FP: 149
 
 ---
 
-## 3. Out-of-Distribution Generaliseringstest (Graf 1 vs. Graf 2)
+## 3. Hva Betyr Dette Faglig og Kommersielt?
 
-I denne testen ble modellene trent på Graf 1 (Seed 42, 600 eiendommer) og testet direkte på en helt usett Graf 2 (Seed 999, 800 eiendommer, +40 % beløpsforskyvning, +25 % støy):
-
-| Modell | Test Accuracy | Test Precision | Test Recall | Test F1 | Falske Positive (FP) | Falske Negative (FN) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Regelbasert Heuristikk** | 68.37 % | 11.85 % | 100.0 % | 0.2118 | 253 | 0 |
-| **Logistic Regression (L2)** | 97.62 % | 64.15 % | 100.0 % | 0.7816 | 19 | 0 |
-| **HistGradientBoosting** | 99.38 % | 93.94 % | 91.18 % | 0.9254 | 2 | 3 |
-| **Random Forest (100 trær)** | **100.00 %** | **100.00 %** | **100.00 %** | **1.0000** | **0** | **0** |
+1. **Alarmkollaps for tradisjonelle regler (20,0 % presisjon, 140 falske alarmer)**:
+   - En regel som varsler på eieravvik eller privat pant treffer 100 % recall, men drukner compliance-analytikere i støy. For hver reelle sak må etterforskere behandle 4–5 falske saker forårsaket av lovlig selgerkreditt, arveoppgjør og konsernholdinger.
+2. **3.75x Presisjonsløft med Maskinlæring (75,2 % presisjon, 11.8 falske alarmer)**:
+   - Random Forest og Gradient Boosting kutter de falske alarmene med over **91.5 %** (fra 140 ned til under 12), samtidig som de bevarer **99.3 % recall**.
+3. **Ingen syntetisk "100 % felle"**:
+   - I et reelt marked finnes det gråsoner (f.eks. private selgerkreditter som ligner lånesirkler før avdragene har løpt lenge nok). Å rapportere et realistisk konfidensintervall (70–85 % presisjon under voldsom støy) gir betydelig større tillit hos regtech-kjøpere enn et perfekt, overtilpasset 100 % resultat.
 
 ---
 
-## 4. Hva Lærte Modellen? (Oppdatert Feature Importance)
+## 4. Viktigste Nøytrale Egenskaper (Feature Importance)
 
-Etter innføringen av legitime private pantelån, har modellen måttet skifte fokus fra rene etiketter til helhetlige flytmønstre:
+Når transaksjonstyper er helt like for kriminelle og legitime aktører, lærer modellen reell nettverkstopologi og relasjonelle flyter:
 
 ```mermaid
 xychart-beta
-    title "Feature Importance med Herdet Støy (%)"
-    x-axis ["net_flow", "tx_in_vol", "discrepancy", "prop_fin", "loan_disb", "loan_repay", "bank_loan", "pvt_lender"]
-    y-axis "Viktighet (%)" 0 --> 20
-    bar [15.3, 14.7, 12.7, 11.8, 6.3, 5.7, 4.8, 4.4]
+    title "Topp Feature Importance i Benchmark v0.2 (%)"
+    x-axis ["ctrl_tf_out", "tx_in_vol", "loan_outflow", "net_flow", "tf_inflow", "discrepancy", "repay_ratio", "pvt_lender"]
+    y-axis "Viktighet (%)" 0 --> 15
+    bar [12.4, 11.3, 10.2, 9.3, 8.5, 8.4, 7.8, 6.5]
 ```
 
-1. **`owner_net_financial_flow` (15.29 %)**: Total ubalanse og netto likviditetsendring på eierkontoen.
-2. **`owner_tx_in_vol` (14.69 %)**: Total inngående transaksjonsmengde.
-3. **`has_ownership_discrepancy` (12.70 %)**: Divergens mellom tinglyst eier og faktisk kontroller (bevart nøyaktig via MultiDiGraph).
-4. **`owner_tx_inflow_property_financing` (11.78 %)**: Målrettet bakmannsfinansiering.
-5. **`owner_tx_inflow_loan_disbursement` (6.25 %)** & **`loan_repayment` (5.67 %)**: Fanger opp sirkulære låneavtaler.
-6. **`mortgagee_is_private_co` (4.39 %)**: Vektet ned fra tidligere 30 % fordi modellen nå forstår at privat pant også forekommer i lovlige sammenhenger (selgerkreditt)!
+1. **`controller_transfer_outflow` (12.4 %)**: Avslører bakmannens direkte finansiering til stråmannen ved blankoskjøter.
+2. **`owner_tx_in_vol` (11.3 %)**: Samlet inngående likviditetsvolum.
+3. **`owner_loan_outflow` (10.2 %)**: Månedlig avdragsbetaling i lånestrukturer.
+4. **`owner_net_financial_flow` (9.3 %)**: Netto kontantstrøm på eierkontoen.
+5. **`owner_transfer_inflow` (8.5 %)**: Mottatte overføringer.
+6. **`has_ownership_discrepancy` (8.4 %)**: Avvik mellom registrert eier og faktisk kontroller (bevart nøyaktig i MultiDiGraph).
+7. **`loan_repayment_ratio` (7.8 %)**: Forholdet mellom tilbakebetalte avdrag og utbetalt lån (skiller ordinære lån fra kortsiktige vaskesirkler).
+8. **`mortgagee_is_private` (6.5 %)**: Indikerer privat panthaver (person eller AS), som sammen med sirkulære relasjoner skiller loan-backs fra selgerkreditt.
 
 ---
 
-## 5. Konklusjon
-Denne oppdaterte testen beviser at:
-- Modellene ikke er overtilpasset til faste beløpsgrenser (overlever +40 % beløpsforskyvning).
-- MultiDiGraph sikrer korrekt relasjonell semantikk uten overskriving av parallelle eierroller.
-- Ytelsesgradienten (11,9 % -> 64,2 % -> 93,9 % -> 100 %) gir en troverdig og faglig forsvarlig benchmark som tåler granskning fra ledende AML-miljøer.
+## 5. Konklusjon og Reproduserbarhet
+
+Benchmark v0.2 er **100 % reproduserbar** ved å kjøre:
+```bash
+python generator.py
+python baseline_model.py
+python generalization_test.py
+python load_to_bigquery.py
+```
+Datasettet og modellene beviser målbar lift og ekte relasjonell separabilitet på tvers av ukjente grafer og endrede økonomiske skalaer.
