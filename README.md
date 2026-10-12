@@ -90,7 +90,16 @@ python load_to_bigquery.py
 ```
 Dette oppretter tabellene i BigQuery med typesikre skjemaer under `aml_synth`, samt views som `v_aml_master_alerts` og `v_entity_risk_summary`.
 
-### 5. Skalering for stordata (Dataproc / Apache Spark)
+### 5. BigQuery Property Graph & GQL
+Grafstrukturen kan opprettes direkte i BigQuery med:
+```sql
+CREATE OR REPLACE PROPERTY GRAPH `datsetsyntetisk.aml_synth.aml_network_graph` ...
+```
+Se [`bigquery_graph_queries.sql`](bigquery_graph_queries.sql) for:
+- Deklarative GQL-mønstre for flerledds eierkjeder og sirkulære låneavtaler (BigQuery Enterprise/Enterprise Plus).
+- Produksjonstestede rekursive SQL-views som kjører på alle BigQuery On-Demand prosjekter.
+
+### 6. Skalering for stordata (Dataproc / Apache Spark)
 Bruk `spark_generator.py` for distribuert syntetisering av millioner av noder og kanter på Google Cloud Dataproc Serverless.
 
 ---
