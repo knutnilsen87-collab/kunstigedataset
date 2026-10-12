@@ -6,6 +6,15 @@ Datasettet kombinerer **eierskapsgraf**, **kontrollgraf** og **transaksjonsflyt*
 
 ---
 
+### 📂 Nordic AML Graph Pack v0.1 – Sentrale Ressurser
+- 📦 **[Pilot & Buyer Guide](nordic_aml_graph_pack_v0.1/PACKAGE_INDEX.md)** – Kom i gang og evaluer sample-pakken på 15 minutter.
+- 📑 **[Technical Whitepaper & Methodology](METHODOLOGY.md)** – Formell spesifikasjon av multilagsgrafen, balansebevaring og typologier.
+- 📈 **[ML Evaluation Report](EVALUATION_REPORT.md)** – Benchmark som dokumenterer 6.6x presisjonsløft (90.9 % vs 13.7 % for enkle regler).
+- ⚖️ **[Commercial & Evaluation Terms](COMMERCIAL_TERMS.md)** – Pilotlisens og vilkår for kommersiell testing.
+- 🗄️ **[BigQuery Graph & GQL Queries](bigquery_graph_queries.sql)** – DDL for Property Graph og spørringer for eierkjeder og lånesirkler.
+
+---
+
 ## 🏛️ Hvorfor Dette Datasettet?
 Tradisjonelle tabellbaserte regelverk og naive IF/THEN-sjekker lider av ekstrem alarmtretthet:
 - En naiv regel som flagger eiendommer med eieravvik eller pant, kollapser i et realistisk marked med **13,7 % presisjon og 63 falske alarmer** på et testsett av 180 eiendommer.
