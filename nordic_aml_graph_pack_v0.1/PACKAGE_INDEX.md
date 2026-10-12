@@ -22,6 +22,7 @@ Velkommen til **Nordic AML Graph Pack v0.1**. Denne pakken inneholder alt du tre
    - [`bigquery_graph_queries.sql`](../bigquery_graph_queries.sql) – DDL for BigQuery Property Graph, deklarativ GQL og produksjonsklare SQL-views.
    - [`baseline_model.py`](../baseline_model.py) – Trenings- og evalueringspipeline for Machine Learning (Benchmark v0.2 nøytrale features).
    - [`generalization_test.py`](../generalization_test.py) – Multi-Seed Out-of-Distribution validering over 4 uavhengige testgrafer.
+   - [`benchmark_walkthrough.ipynb`](../benchmark_walkthrough.ipynb) – Interaktiv Google Colab walkthrough med visuell graf-plotting og modell-sammenligning.
    - [`spark_generator.py`](../spark_generator.py) – PySpark-skript for oppskalering til 100 000+ noder på Dataproc Serverless.
 
 ---

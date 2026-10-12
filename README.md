@@ -1,6 +1,10 @@
 # Syntetisk AML Grafdatasett for Eiendom & Foretaksstrukturer
 **Nordic AML Graph Pack v0.2 – Independent Multi-Seed Benchmark**
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/knutnilsen87-collab/kunstigedataset/blob/main/benchmark_walkthrough.ipynb)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-kunstigedataset-blue.svg)](https://github.com/knutnilsen87-collab/kunstigedataset)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 Et produksjonsklart, syntetisk multilags grafdatasett for anti-hvitvasking (AML) innen eiendom og komplekse selskapsstrukturer, tilpasset nordiske forhold og trusselvurderinger (Økokrim).
 
 Datasettet kombinerer **eierskapsgraf**, **kontrollgraf** og **transaksjonsflyt**, og håndhever **100 % matematisk balansebevaring (balance conservation)** i det lukkede finansielle kretsløpet.
@@ -8,6 +12,7 @@ Datasettet kombinerer **eierskapsgraf**, **kontrollgraf** og **transaksjonsflyt*
 ---
 
 ### 📂 Sentrale Ressurser
+- 🚀 **[Interactive Colab Walkthrough (1-Click Run)](https://colab.research.google.com/github/knutnilsen87-collab/kunstigedataset/blob/main/benchmark_walkthrough.ipynb)** – Kjør generering, visuelle grafer og modell-evaluering direkte i nettleseren.
 - 📦 **[Pilot & Buyer Guide](nordic_aml_graph_pack_v0.1/PACKAGE_INDEX.md)** – Kom i gang og evaluer sample-pakken på 15 minutter.
 - 📑 **[Technical Whitepaper & Methodology](METHODOLOGY.md)** – Formell spesifikasjon av multilagsgrafen, balansebevaring og typologier.
 - 📈 **[ML Evaluation Report (Benchmark v0.2)](EVALUATION_REPORT.md)** – Multi-seed blind test som dokumenterer 3.75x presisjonsløft (75.2 % vs 20.0 % for regler) og 91.5 % kutt i falske alarmer.
